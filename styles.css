@@ -164,6 +164,7 @@ h1 {
   font-weight: 500;
   margin-top: 0.25rem;
   color: var(--accent);
+  overflow-wrap: anywhere;
 }
 
 .stat .value.secondary {

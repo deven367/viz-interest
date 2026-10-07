@@ -15,7 +15,7 @@
   <body>
     <main>
       <h1>Compound interest</h1>
-      <p class="subtitle">Enter one or more annual rates (comma-separated) to compare curves on the same chart.</p>
+      <p class="subtitle">Enter one or more annual rates (comma-separated) to compare curves on the same chart. Large axis labels are abbreviated when needed; summaries show full dollar amounts.</p>
 
       <section class="panel" aria-labelledby="controls-heading">
         <h2 id="controls-heading">Inputs</h2>
@@ -26,9 +26,10 @@
           </div>
           <div class="field field-wide">
             <label for="rates"
-              >Annual rates (%)<span class="field-hint">comma-separated, e.g. 4, 6, 8</span></label
+              >Annual rates (%)<span class="field-hint">0–100, comma-separated, e.g. 4, 6, 8</span></label
             >
-            <input id="rates" type="text" value="4, 6, 8" placeholder="5 or 4, 6, 8" autocomplete="off" />
+            <input id="rates" type="text" value="4, 6, 8" placeholder="5 or 4, 6, 8" autocomplete="off" aria-describedby="rates-error" />
+            <span class="field-hint" id="rates-error" role="alert" hidden></span>
           </div>
           <div class="field">
             <label for="years">Years</label>
@@ -69,6 +70,8 @@
         const form = document.getElementById("form");
         const summary = document.getElementById("summary");
         const legendEl = document.getElementById("legend");
+        const ratesInput = document.getElementById("rates");
+        const ratesError = document.getElementById("rates-error");
 
         const COLORS = {
           bg: "#1a2332",
@@ -97,20 +100,16 @@
         function parseRates(str) {
           const rows = [];
           const seen = new Set();
-          String(str)
-            .split(/[,;]+/)
-            .map((s) => s.trim().replace(/%/g, ""))
-            .filter(Boolean)
-            .forEach((part) => {
-              const v = parseFloat(part);
-              if (!Number.isFinite(v)) return;
-              const pct = Math.min(100, Math.max(0, v));
-              const key = Math.round(pct * 10000);
-              if (seen.has(key)) return;
-              seen.add(key);
-              rows.push({ pct, r: pct / 100 });
-            });
-          if (rows.length === 0) rows.push({ pct: 0, r: 0 });
+          // Reject the whole list rather than silently dropping or changing a rate.
+          for (const part of String(str).split(/[,;]/).map((s) => s.trim())) {
+            if (!/^(?:\d+(?:\.\d*)?|\.\d+)\s*%?$/.test(part)) return null;
+            const pct = Number(part.replace(/%$/, "").trim());
+            if (!Number.isFinite(pct) || pct > 100) return null;
+            const key = Math.round(pct * 10000);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            rows.push({ pct, r: pct / 100 });
+          }
           return rows;
         }
 
@@ -118,7 +117,7 @@
           const P = Math.max(0, Number(document.getElementById("principal").value) || 0);
           const years = Math.max(1, Math.min(80, Number(document.getElementById("years").value) || 1));
           const n = Math.max(1, Number(document.getElementById("compound").value) || 12);
-          const rateRows = parseRates(document.getElementById("rates").value);
+          const rateRows = parseRates(ratesInput.value);
           return { P, years, n, rateRows };
         }
 
@@ -160,6 +159,19 @@
           }
 
           const { P, years, n, rateRows } = readInputs();
+          const error = rateRows ? "" : "Enter rates from 0 to 100, separated by commas (e.g. 4, 6, 8).";
+          ratesInput.setCustomValidity(error);
+          ratesInput.setAttribute("aria-invalid", String(!rateRows));
+          ratesError.textContent = error;
+          ratesError.hidden = !error;
+          if (!rateRows) {
+            ctx.fillStyle = COLORS.bg;
+            ctx.fillRect(0, 0, w, h);
+            legendEl.innerHTML = "";
+            summary.innerHTML = "";
+            canvas.setAttribute("aria-label", "Chart unavailable: invalid annual rates.");
+            return;
+          }
           const seriesList = rateRows.map((row, i) => ({
             pct: row.pct,
             r: row.r,
@@ -167,7 +179,8 @@
             series: buildSeries(P, row.r, n, years),
             finalA: balanceAt(P, row.r, n, years),
           }));
-          const maxY = Math.max(P, ...seriesList.map((s) => s.finalA)) * 1.08;
+          // A zero balance still needs a nonzero axis range.
+          const maxY = Math.max(P, ...seriesList.map((s) => s.finalA)) * 1.08 || 1;
 
           canvas.setAttribute(
             "aria-label",
@@ -175,8 +188,24 @@
           );
 
           ctx.font = `${11 * dpr}px "JetBrains Mono", monospace`;
-          // Size the gutter for the widest currency label, with 8px on each side.
-          const padL = Math.max(56 * dpr, ctx.measureText(formatMoney(maxY)).width + 16 * dpr);
+          const yTicks = 5;
+          const yValues = Array.from({ length: yTicks + 1 }, (_, i) => maxY * (1 - i / yTicks));
+          let yLabels = yValues.map(formatMoney);
+          let labelWidth = Math.max(...yLabels.map((label) => ctx.measureText(label).width));
+          // Keep most of the chart for plotting; summaries always retain full amounts.
+          for (const notation of ["compact", "scientific"]) {
+            if (labelWidth + 16 * dpr <= w * 0.35) break;
+            const formatter = new Intl.NumberFormat("en-US", {
+              style: "currency",
+              currency: "USD",
+              notation,
+              maximumFractionDigits: 1,
+              minimumFractionDigits: 0,
+            });
+            yLabels = yValues.map((value) => formatter.format(value));
+            labelWidth = Math.max(...yLabels.map((label) => ctx.measureText(label).width));
+          }
+          const padL = Math.max(56 * dpr, labelWidth + 16 * dpr);
           const padR = 20 * dpr;
           const padT = 24 * dpr;
           const padB = 40 * dpr;
@@ -190,10 +219,8 @@
           ctx.strokeStyle = COLORS.grid;
           ctx.lineWidth = 1 * dpr;
           ctx.fillStyle = COLORS.text;
-          const yTicks = 5;
           for (let i = 0; i <= yTicks; i++) {
             const frac = i / yTicks;
-            const yVal = maxY * (1 - frac);
             const y = padT + ch * frac;
             ctx.beginPath();
             ctx.moveTo(padL, y);
@@ -201,7 +228,7 @@
             ctx.stroke();
             ctx.textAlign = "right";
             ctx.textBaseline = "middle";
-            ctx.fillText(formatMoney(yVal), padL - 8 * dpr, y);
+            ctx.fillText(yLabels[i], padL - 8 * dpr, y);
           }
 
           // X labels (years)
