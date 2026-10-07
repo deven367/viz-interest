@@ -174,7 +174,9 @@
             `Compound balance over ${years} years at ${rateRows.map((row) => formatPct(row.pct)).join(", ")} compared to principal ${formatMoney(P)}.`
           );
 
-          const padL = 56 * dpr;
+          ctx.font = `${11 * dpr}px "JetBrains Mono", monospace`;
+          // Size the gutter for the widest currency label, with 8px on each side.
+          const padL = Math.max(56 * dpr, ctx.measureText(formatMoney(maxY)).width + 16 * dpr);
           const padR = 20 * dpr;
           const padT = 24 * dpr;
           const padB = 40 * dpr;
@@ -187,7 +189,6 @@
           // Grid + Y labels
           ctx.strokeStyle = COLORS.grid;
           ctx.lineWidth = 1 * dpr;
-          ctx.font = `${11 * dpr}px "JetBrains Mono", monospace`;
           ctx.fillStyle = COLORS.text;
           const yTicks = 5;
           for (let i = 0; i <= yTicks; i++) {
@@ -282,6 +283,7 @@
         form.addEventListener("change", draw);
         window.addEventListener("resize", draw);
         draw();
+        document.fonts.ready.then(draw);
       })();
     </script>
   </body>
